@@ -7,8 +7,8 @@ import math
 from fpdf import FPDF
 
 # Inicializacao do MediaPipe Pose
-mp_pose = mp.solutions.pose
-mp_drawing = mp.solutions.drawing_utils
+import mediapipe.python.solutions.pose as mp_pose
+import mediapipe.python.solutions.drawing_utils as mp_drawing
 
 def calcular_angulo(a, b, c):
     """Calcula o angulo usando matemática escalar pura (evita erros de array)."""
