@@ -1,19 +1,14 @@
 import streamlit as st
 import cv2
-import mediapipe as mp
+from cvzone.PoseModule import PoseDetector
 import numpy as np
 import tempfile
 import math
 from fpdf import FPDF
 
-# Inicializacao do MediaPipe Pose
-import mediapipe.python.solutions.pose as mp_pose
-import mediapipe.python.solutions.drawing_utils as mp_drawing
-
 def calcular_angulo(a, b, c):
-    """Calcula o angulo usando matemática escalar pura (evita erros de array)."""
-    # a, b, c sao listas com duas coordenadas [x, y]
-    ang = math.degrees(math.atan2(c[1] - b[1], c[0] - b[0]) - math.atan2(a[1] - b[1], a[0] - b[0]))
+    """Calcula o angulo usando pontos escalares simples."""
+    ang = math.degrees(math.atan2(c[1] - b[1], c[1] - b[0]) - math.atan2(a[1] - b[1], a[1] - b[0]))
     ang = abs(ang)
     if ang > 180.0:
         ang = 360 - ang
@@ -56,7 +51,6 @@ def gerar_pdf(nome_atleta, modulo, insights, angulo_max, feedback_geral):
     pdf.output(path_pdf)
     return path_pdf
 
-# Configuracao Base do Streamlit
 st.set_page_config(page_title="Athlete AI Insights", page_icon="⚽", layout="wide")
 st.title("📋 Athlete AI Insights REPORT")
 
@@ -75,77 +69,75 @@ if video_file is not None:
     valgo_detectado = False
     tronco_inclinado_detectado = False
 
-    with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret: break
-            frame = cv2.resize(frame, (640, 480))
-            image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = pose.process(image)
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            
-            if results.pose_landmarks:
-                landmarks = results.pose_landmarks.landmark
-                mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-                
-                if modulo == "Academia (Agachamento)":
-                    quadril = [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x, landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y]
-                    joelho = [landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x, landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
-                    tornozelo = [landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].x, landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
-                    
-                    angulo = calcular_angulo(quadril, joelho, tornozelo)
-                    if angulo < angulo_extremo: 
-                        angulo_extremo = angulo
-                    
-                    if angulo > 90:
-                        cv2.putText(image, "Aviso: Aumentar amplitude!", (40, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-                    else:
-                        cv2.putText(image, "Boa amplitude!", (40, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-                        
-                    # Valgo Dinâmico: Verifica se a posição X do joelho desvia horizontalmente do quadril
-                    if abs(joelho[0] - quadril[0]) > 0.05:
-                        valgo_detectado = True
-                        cv2.putText(image, "ALERTA: Valgo Dinamico!", (40, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 165, 255), 2)
-                        
-                elif modulo == "Campo (Mecânica do Chute)":
-                    ombro = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-                    quadril = [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x, landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y]
-                    
-                    # Cálculo escalar do tronco em relação à vertical
-                    dx = ombro[0] - quadril[0]
-                    dy = ombro[1] - quadril[1]
-                    inclinacao = abs(math.degrees(math.atan2(dx, -dy)))
-                    
-                    if inclinacao > angulo_extremo: 
-                        angulo_extremo = inclinacao
-                    if inclinacao > 15:
-                        tronco_inclinado_detectado = True
-                        cv2.putText(image, "Tronco muito inclinado para tras!", (40, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                    else:
-                        cv2.putText(image, "Inclinacao correta do tronco", (40, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            stframe.image(image, channels="BGR")
-        cap.release()
-        st.success("Processamento biomecanico finalizado!")
-        
-        if modulo == "Academia (Agachamento)":
-            if angulo_extremo <= 90:
-                piores_metricas.append("O atleta quebrou a paralela com sucesso.")
-                feedback_geral = "Manter o volume de treino atual."
-            else:
-                piores_metricas.append("Foi observada amplitude insuficiente.")
-                feedback_geral = "Inserir rotinas focadas em mobilidade de tornozelo."
-            if valgo_detectado:
-                piores_metricas.append("Risco de lesao ligamentar devido ao desvio de Valgo Dinamico.")
-                feedback_geral += " Adicionar exercicios para fortalecimento."
-        else:
-            if tronco_inclinado_detectado:
-                piores_metricas.append("Inclinacao excessiva do tronco para tras.")
-                feedback_geral = "Realizar educativos de chute estacionario projetando o peito."
-            else:
-                piores_metricas.append("Mecanica postural correta.")
-                feedback_geral = "Postura correta estabilizada."
+    # Inicializa o detector ultra-estavel do cvzone
+    detector = PoseDetector()
 
-        st.subheader("📊 Documentacao de Performance")
-        pdf_path = gerar_pdf(nome_atleta, modulo, piores_metricas, angulo_extremo, feedback_geral)
-        with open(pdf_path, "rb") as f:
-            st.download_button(label="Download Relatorio PDF", data=f, file_name="Relatorio.pdf", mime="application/pdf")
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret: break
+        frame = cv2.resize(frame, (640, 480))
+        
+        # Encontra o corpo e desenha o esqueleto anatômico
+        frame = detector.findPose(frame)
+        lmList, bboxInfo = detector.findPosition(frame, bboxWithHands=False)
+        
+        if lmList:
+            if modulo == "Academia (Agachamento)":
+                # Pontos esquerdo: Quadril (24), Joelho (26), Tornozelo (28)
+                quadril = lmList[24][1:3]
+                joelho = lmList[26][1:3]
+                tornozelo = lmList[28][1:3]
+                
+                angulo = calcular_angulo(quadril, joelho, tornozelo)
+                if angulo < angulo_extremo: 
+                    angulo_extremo = angulo
+                
+                if angulo > 90:
+                    cv2.putText(frame, "Aviso: Aumentar amplitude!", (40, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                else:
+                    cv2.putText(frame, "Boa amplitude!", (40, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+                    
+                if abs(joelho[0] - quadril[0]) > 25:
+                    valgo_detectado = True
+                    cv2.putText(frame, "ALERTA: Valgo Dinamico!", (40, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 165, 255), 2)
+                    
+            elif modulo == "Campo (Mecânica do Chute)":
+                # Pontos esquerdo: Ombro (12), Quadril (24)
+                ombro = lmList[12][1:3]
+                quadril = lmList[24][1:3]
+                
+                inclinacao = abs(math.degrees(math.atan2(ombro[0] - quadril[0], quadril[1] - ombro[1])))
+                if inclinacao > angulo_extremo: 
+                    angulo_extremo = inclinacao
+                if inclinacao > 15:
+                    tronco_inclinado_detectado = True
+                    cv2.putText(frame, "Tronco muito inclinado para tras!", (40, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                else:
+                    cv2.putText(frame, "Inclinacao correta do tronco", (40, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        
+        stframe.image(frame, channels="BGR")
+    cap.release()
+    st.success("Processamento biomecanico finalizado!")
+    
+    if modulo == "Academia (Agachamento)":
+        if angulo_extremo <= 90:
+            piores_metricas.append("O atleta quebrou a paralela com sucesso.")
+            feedback_geral = "Manter o volume de treino atual."
+        else:
+            piores_metricas.append("Foi observada amplitude insuficiente.")
+            feedback_geral = "Inserir rotinas focadas em mobilidade de tornozelo."
+        if valgo_detectado:
+            piores_metricas.append("Risco de lesao ligamentar devido ao desvio de Valgo Dinamico.")
+            feedback_geral += " Adicionar exercicios para fortalecimento."
+    else:
+        if tronco_inclinado_detectado:
+            piores_metricas.append("Inclinacao excessiva do tronco para tras.")
+            feedback_geral = "Realizar educativos de chute estacionario projetando o peito."
+        else:
+            piores_metricas.append("Mecanica postural correta.")
+            feedback_geral = "Postura correta estabilizada."
+
+    st.subheader("📊 Documentacao de Performance")
+    pdf_path = gerar_pdf(nome_atleta, modulo, piores_metricas, angulo_extremo, feedback_geral)
+    with open(pdf_path, "rb") as f:
+        st.download_button(label="Download Relatorio PDF", data=f, file_name="Relatorio.pdf", mime="application/pdf")
